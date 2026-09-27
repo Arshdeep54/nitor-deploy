@@ -1,0 +1,76 @@
+name: Deploy ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: ECR image tag from the nitor app repo (e.g. v0.1.5)
+        required: true
+        type: string
+      release_api:
+        description: Roll tracker-api-service
+        type: boolean
+        default: true
+      release_agent:
+        description: Roll tracker-agent service
+        type: boolean
+        default: true
+      run_migrations:
+        description: Run RDS migrations before service rolls
+        type: boolean
+        default: true
+  repository_dispatch:
+    types: [nitor-release]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release inputs
+        id: release
+        env:
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          flag() {
+            case "$(echo "$1" | tr '[:upper:]' '[:lower:]')" in
+              1|true|yes) echo 1 ;;
+              *) echo 0 ;;
+            esac
+          }
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            tag="$(echo "$PAYLOAD" | jq -r '.tag // empty')"
+            [ -n "$tag" ] || { echo "client_payload.tag is required" >&2; exit 1; }
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "release_api=$(flag "$(echo "$PAYLOAD" | jq -r '.release_api // true')")" >> "$GITHUB_OUTPUT"
+            echo "release_agent=$(flag "$(echo "$PAYLOAD" | jq -r '.release_agent // true')")" >> "$GITHUB_OUTPUT"
+            echo "run_migrations=$(flag "$(echo "$PAYLOAD" | jq -r '.run_migrations // true')")" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "release_api=$(flag "${{ inputs.release_api }}")" >> "$GITHUB_OUTPUT"
+            echo "release_agent=$(flag "${{ inputs.release_agent }}")" >> "$GITHUB_OUTPUT"
+            echo "run_migrations=$(flag "${{ inputs.run_migrations }}")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::546702454248:role/github-actions-tracker-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Roll out ECS
+        env:
+          RELEASE_API: ${{ steps.release.outputs.release_api }}
+          RELEASE_AGENT: ${{ steps.release.outputs.release_agent }}
+          RUN_MIGRATIONS: ${{ steps.release.outputs.run_migrations }}
+        run: |
+          chmod +x scripts/ecs-release.sh
+          ./scripts/ecs-release.sh "${{ steps.release.outputs.tag }}"
