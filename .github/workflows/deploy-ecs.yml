@@ -29,6 +29,10 @@ permissions:
 env:
   AWS_REGION: ap-south-1
 
+concurrency:
+  group: ecs-deploy-${{ github.event.inputs.release_tag || github.event.client_payload.tag || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
