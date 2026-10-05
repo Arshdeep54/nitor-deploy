@@ -40,8 +40,6 @@ register_migrate_task() {
           {name: "PGUSER", value: $user},
           {name: "PGDATABASE", value: $db}
         ]
-      # the image's own entrypoint (/run.sh) runs the migrations and reads MIGRATE_TARGET; an entryPoint/command override copied forward from an
-      # older revision ("/bin/sh" with the script text and no -c) made the task fail with "can't open 'set -eu; ...'"
       | del(.containerDefinitions[0].entryPoint, .containerDefinitions[0].command)
     ' > /tmp/migrate-task.json
   aws ecs register-task-definition --region "$AWS_REGION" --cli-input-json file:///tmp/migrate-task.json \
